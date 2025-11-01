@@ -1,0 +1,25 @@
+{
+    "name": "ecxod/youtube",
+    "description": "Langweilige Library des Ecxod Projekts",
+    "type": "library",
+    "keywords": ["ecxod", "youtube", "yt"],
+    "license": "MIT",
+    "autoload": {
+        "files": [
+            "src/youtube/yt.php"
+        ],
+        "psr-4": {
+            "Ecxod\\YouTube\\": "src/youtube/"
+        }
+    },
+        "authors": [
+        {
+            "name": "Christian Eichert",
+            "email": "c@zp1.net"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "php": "^7.2|^7.4|^8.0|^8.2"
+    }
+}
