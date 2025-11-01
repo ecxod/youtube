@@ -1,4 +1,8 @@
 <?php
+declare(strict_types=1);
+
+namespace Ecxod\YouTube;
+
 /**
  * YouTubeChannelInfo
  *
@@ -109,10 +113,9 @@ class YouTubeChannelInfo
      * Helper: fetch JSON from a URL and decode it.
      *
      * @param string $url
-     * @return array
-     * @throws RuntimeException on network/JSON errors
+     * @return array|bool
      */
-    private function fetchJson(string $url): array
+    private function fetchJson(string $url): array|bool
     {
         $ctx = stream_context_create([
             'http' => [
@@ -124,14 +127,15 @@ class YouTubeChannelInfo
 
         $response = @file_get_contents($url, false, $ctx);
         if ($response === false) {
-            throw new RuntimeException('Failed to fetch data from YouTube API.');
+            \Sentry\captureMessage('Failed to fetch data from YouTube API.');
+            return false;
         }
 
         $data = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new RuntimeException('Invalid JSON response from YouTube API.');
+            \Sentry\captureMessage('Invalid JSON response from YouTube API.');
+            return false;
         }
-
         return $data;
     }
 }
