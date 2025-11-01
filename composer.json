@@ -5,9 +5,6 @@
     "keywords": ["ecxod", "youtube", "yt"],
     "license": "MIT",
     "autoload": {
-        "files": [
-            "src/youtube/yt.php"
-        ],
         "psr-4": {
             "Ecxod\\YouTube\\": "src/youtube/"
         }
