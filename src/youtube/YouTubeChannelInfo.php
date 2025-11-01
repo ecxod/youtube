@@ -38,76 +38,101 @@ class YouTubeChannelInfo
      */
     public function getChannelInfo(string $channelId): ?array
     {
-        // 1️⃣ Get basic channel stats + uploads playlist ID
-        $channelUrl = self::API_BASE . '/channels?part=statistics,snippet,contentDetails&id=' .
+        // -------------------------------------------------
+        // 1️⃣ Channel meta + uploads‑playlist ID
+        // -------------------------------------------------
+        $url = self::API_BASE . '/channels?part=statistics,snippet,contentDetails&id=' .
             urlencode($channelId) . '&key=' . $this->apiKey;
 
-        $channelData = $this->fetchJson($channelUrl);
-        if (empty($channelData['items'][0] ?? null)) {
-            return null; // invalid channel
+        $data = $this->fetchJson($url);
+        if(empty($data['items'][0]))
+        {
+            return null;
         }
 
-        $item = $channelData['items'][0];
-        $stats = $item['statistics'];
-        $snippet = $item['snippet'];
-        $uploadsPlaylistId = $item['contentDetails']['relatedPlaylists']['uploads'];
+        $item       = $data['items'][0];
+        $stats      = $item['statistics'];
+        $snippet    = $item['snippet'];
+        $playlistId = $item['contentDetails']['relatedPlaylists']['uploads'];
 
-        $channelInfo = [
-            'subscribers'   => (int)($stats['subscriberCount'] ?? 0),
-            'creationDate'  => $snippet['publishedAt'] ?? null,
-            'totalViews'    => (int)($stats['viewCount'] ?? 0),
-            'totalUploads'  => (int)($stats['videoCount'] ?? 0),
-            'uploads'       => [], // will be filled below
+        $result = [ 
+            'subscribers'  => (int) ($stats['subscriberCount'] ?? 0),
+            'creationDate' => $snippet['publishedAt'] ?? null,
+            'totalViews'   => (int) ($stats['viewCount'] ?? 0),
+            'totalUploads' => (int) ($stats['videoCount'] ?? 0),
+            'uploads'      => [],   // filled later
         ];
 
-        // 2️⃣ Retrieve all videos from the uploads playlist (paged)
+        // -------------------------------------------------
+        // 2️⃣ Pull every video from the uploads playlist
+        // -------------------------------------------------
         $nextPageToken = '';
-        do {
-            $playlistUrl = self::API_BASE . '/playlistItems?part=snippet&playlistId=' .
-                urlencode($uploadsPlaylistId) .
+        $uploadsById   = [];
+
+        do
+        {
+            $plUrl = self::API_BASE . '/playlistItems?part=snippet&playlistId=' .
+                urlencode($playlistId) .
                 '&maxResults=50' .
                 ($nextPageToken ? '&pageToken=' . $nextPageToken : '') .
                 '&key=' . $this->apiKey;
 
-            $playlistData = $this->fetchJson($playlistUrl);
-            foreach ($playlistData['items'] as $video) {
-                $videoId = $video['snippet']['resourceId']['videoId'];
-                $channelInfo['uploads'][] = [
-                    'videoId'     => $videoId,
-                    'title'       => $video['snippet']['title'],
-                    'publishedAt' => $video['snippet']['publishedAt'],
-                    // viewCount will be added later
+            $plData = $this->fetchJson($plUrl);
+            foreach($plData['items'] as $v)
+            {
+                $vid               = $v['snippet']['resourceId']['videoId'];
+                $uploadsById[ $vid ] = [ 
+                    'videoId'      => $vid,
+                    'title'        => $v['snippet']['title'],
+                    'publishedAt'  => $v['snippet']['publishedAt'],
+                    // placeholders for stats
+                    'viewCount'    => 0,
+                    'likeCount'    => 0,
+                    'commentCount' => 0,
                 ];
             }
-            $nextPageToken = $playlistData['nextPageToken'] ?? '';
-        } while ($nextPageToken);
+            $nextPageToken = $plData['nextPageToken'] ?? '';
+        } while($nextPageToken);
 
-        // 3️⃣ Batch‑request video statistics (max 50 IDs per request)
-        $uploads = &$channelInfo['uploads'];
-        $chunks = array_chunk($uploads, 50);
-        foreach ($chunks as $chunk) {
-            $ids = array_map(fn($v) => $v['videoId'], $chunk);
+        // -------------------------------------------------
+        // 3️⃣ Batch‑request statistics (max 50 IDs per call)
+        // -------------------------------------------------
+        $chunks = array_chunk(array_keys($uploadsById), 50);
+        foreach($chunks as $chunk)
+        {
+            $ids = implode(',', $chunk);
+            // request the statistics we need
             $statsUrl = self::API_BASE . '/videos?part=statistics&id=' .
-                implode(',', $ids) .
-                '&key=' . $this->apiKey;
+                $ids . '&key=' . $this->apiKey;
 
             $statsData = $this->fetchJson($statsUrl);
-            foreach ($statsData['items'] as $statItem) {
-                $vid = $statItem['id'];
-                $viewCount = (int)($statItem['statistics']['viewCount'] ?? 0);
-                // locate the matching upload entry
-                foreach ($chunk as &$u) {
-                    if ($u['videoId'] === $vid) {
-                        $u['viewCount'] = $viewCount;
-                        break;
-                    }
+            foreach($statsData['items'] as $item)
+            {
+                $vid = $item['id'];
+                if(!isset($uploadsById[ $vid ]))
+                {
+                    continue; // safety check
                 }
-                unset($u);
+                $uploadsById[ $vid ]['viewCount']    = (int) ($item['statistics']['viewCount'] ?? 0);
+                $uploadsById[ $vid ]['likeCount']    = (int) ($item['statistics']['likeCount'] ?? 0);
+                $uploadsById[ $vid ]['commentCount'] = (int) ($item['statistics']['commentCount'] ?? 0);
+                // dislikeCount is not returned by the API
             }
         }
 
-        return $channelInfo;
+        // -------------------------------------------------
+        // 4️⃣ Return ordered list
+        // -------------------------------------------------
+        $result['uploads'] = array_values($uploadsById);
+        return $result;
     }
+
+
+
+
+
+
+
 
     /**
      * Helper: fetch JSON from a URL and decode it.
@@ -117,8 +142,8 @@ class YouTubeChannelInfo
      */
     private function fetchJson(string $url): array|bool
     {
-        $ctx = stream_context_create([
-            'http' => [
+        $ctx = stream_context_create([ 
+            'http' => [ 
                 'method'  => 'GET',
                 'timeout' => 10,
                 'header'  => "Accept: application/json\r\n",
@@ -126,13 +151,15 @@ class YouTubeChannelInfo
         ]);
 
         $response = @file_get_contents($url, false, $ctx);
-        if ($response === false) {
+        if($response === false)
+        {
             \Sentry\captureMessage('Failed to fetch data from YouTube API.');
             return false;
         }
 
         $data = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        if(json_last_error() !== JSON_ERROR_NONE)
+        {
             \Sentry\captureMessage('Invalid JSON response from YouTube API.');
             return false;
         }
